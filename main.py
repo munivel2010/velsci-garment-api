@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 import cv2
 import numpy as np
@@ -13,6 +14,7 @@ import uvicorn
 
 app = FastAPI(title="Velsci Garment Pattern & Cloud Storage API")
 
+# CORS Policy
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,9 +23,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supabase Credentials (Render Environment Variables-ல் அமைக்க வேண்டும்)
-SUPABASE_URL = "https://your-supabase-url.supabase.co"
-SUPABASE_KEY = "your-supabase-anon-key"
+# Supabase Credentials (Render Environment Variables மூலம் எடுக்கப்படும்)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://opmxgfeprpmrfkjlnqjs.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_0cOFGdJAa8FQRxuv5Ka_HQ_FCmuZUhO")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 FABRIC_SHRINKAGE = {"cotton": 0.08, "silk": 0.02, "denim": 0.05, "polyester": 0.01}
@@ -49,6 +51,15 @@ def calculate_fabric_requirement(width_px, height_px, fabric_type, roll_width_in
         "width_cm": round(total_width_cm, 1),
         "estimated_meters": round(required_meters, 2),
         "total_price": round(total_price, 2)
+    }
+
+# Root Endpoint (404 Not Found பிழையைத் தவிர்க்கும்)
+@app.get("/")
+async def root():
+    return {
+        "status": "online",
+        "message": "Velsci Garment Pattern API is running successfully!",
+        "docs_url": "/docs"
     }
 
 # 1. எஸ்டிமேஷன் செய்து Cloud-ல் சேமிக்கும் Endpoint
@@ -96,10 +107,14 @@ async def process_and_save(
                 c_pdf.showPage()
                 c_pdf.save()
 
-                # PDF-ஐ Supabase Storage-ல் Upload செய்தல்
+                # PDF-ஐ Supabase Storage-ல் Upload செய்தல் (Overwriting அனுமதித்து)
                 file_name = f"estimates/{roll_id}_pattern.pdf"
                 with open(pdf_path, 'rb') as f:
-                    supabase.storage.from_('pdf_patterns').upload(file_name, f)
+                    supabase.storage.from_('pdf_patterns').upload(
+                        file_name, 
+                        f, 
+                        file_options={"upsert": "true"}
+                    )
 
                 pdf_public_url = supabase.storage.from_('pdf_patterns').get_public_url(file_name)
 
@@ -138,4 +153,5 @@ async def delete_estimate(roll_id: str):
         raise HTTPException(status_code=500, detail=f"Deletion failed: {str(e)}")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
